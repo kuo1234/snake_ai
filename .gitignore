@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv/
+venv/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Data / Models (optional)
+*.pkl
+*.pt
+*.h5
+*.ckpt
+
+# Local artifacts
+training_progress_chart.png
+snake_ai_presentation.pptx
+
+# Ignore sound binaries if large (optional)
+sound/*.wav
