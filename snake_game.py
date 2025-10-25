@@ -98,6 +98,10 @@ class SnakeGame:
         if not done:
             self.snake.insert(0, (row, col))
             self.non_snake.remove((row, col))
+            
+            # Check if snake filled the entire board (win condition)
+            if len(self.snake) >= self.grid_size:
+                done = True
 
         else: # If game is over and the game is not in silent mode, play game over sound effect.
             if not self.silent_mode:

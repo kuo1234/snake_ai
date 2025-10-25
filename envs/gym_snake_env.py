@@ -45,7 +45,7 @@ class GymSnakeEnv(gym.Env):
 
         # Track episode statistics
         self.episode_length = 0
-        self.max_episode_length = board_size * board_size * 2  # Prevent infinite loops
+        self.max_episode_length = board_size * board_size * 10  # Allow longer episodes for better play
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[np.ndarray, dict]:
         """Reset the environment to initial state."""

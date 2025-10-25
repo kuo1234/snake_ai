@@ -58,7 +58,7 @@ class GymSnakeEnvV2(gym.Env):
 
         # Track episode statistics
         self.episode_length = 0
-        self.max_episode_length = board_size * board_size * 3  # More lenient for exploration
+        self.max_episode_length = board_size * board_size * 10  # Allow longer episodes for better play
         
         # Previous position for reward shaping
         self.prev_head_pos = None

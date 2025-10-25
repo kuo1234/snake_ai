@@ -1,7 +1,7 @@
 """
 貪吃蛇AI可視化演示
 觀看訓練好的AI如何遊戲
-支援 Q-learning、PPO V1 和 PPO V2 三種模型
+支援 Q-learning、PPO V1、PPO V2 和 PPO V3 (Curriculum Learning) 四種模型
 """
 
 import sys
@@ -68,7 +68,8 @@ def list_available_models():
     models = {
         'qlearning': [],
         'ppo_v1': [],
-        'ppo_v2': []
+        'ppo_v2': [],
+        'ppo_v3': []
     }
     
     # Q-learning 模型 (在根目錄)
@@ -99,6 +100,27 @@ def list_available_models():
         # 所有 checkpoint
         for f in glob.glob(os.path.join(ppo_v2_dir, "*.zip")):
             models['ppo_v2'].append(f)
+    
+    # PPO V3 模型（課程學習，4個階段）
+    ppo_v3_base = "models/ppo_snake_v3_curriculum"
+    if os.path.exists(ppo_v3_base):
+        stages = ["Stage1_Novice", "Stage2_Intermediate", "Stage3_Advanced", "Stage4_Master"]
+        for stage in stages:
+            stage_dir = os.path.join(ppo_v3_base, stage)
+            if os.path.exists(stage_dir):
+                # 最佳模型（畢業模型）
+                best = os.path.join(stage_dir, "best_model", "best_model.zip")
+                if os.path.exists(best):
+                    models['ppo_v3'].append(best)
+                # 最終模型
+                final = os.path.join(stage_dir, "model.zip")
+                if os.path.exists(final):
+                    models['ppo_v3'].append(final)
+                # Checkpoints
+                checkpoint_dir = os.path.join(stage_dir, "checkpoints")
+                if os.path.exists(checkpoint_dir):
+                    for f in glob.glob(os.path.join(checkpoint_dir, "*.zip")):
+                        models['ppo_v3'].append(f)
     
     return models
 
@@ -187,6 +209,11 @@ class ModelSelector:
                           f"PPO V2 ({len(self.models['ppo_v2'])}個)", "ppo_v2")
             self.type_buttons.append(btn)
         
+        if HAS_PPO and self.models['ppo_v3']:
+            btn = UIButton(center_x, start_y + spacing * 3, button_width, button_height, 
+                          f"PPO V3 🎓 ({len(self.models['ppo_v3'])}個)", "ppo_v3")
+            self.type_buttons.append(btn)
+        
         # 輸入框相關（自定義棋盤大小）
         self.input_active = True  # 直接進入輸入模式
         self.input_text = ""
@@ -224,7 +251,8 @@ class ModelSelector:
         type_names = {
             'qlearning': 'Q-Learning',
             'ppo_v1': 'PPO V1',
-            'ppo_v2': 'PPO V2'
+            'ppo_v2': 'PPO V2',
+            'ppo_v3': 'PPO V3 (課程學習)'
         }
         title = f"選擇 {type_names.get(self.selected_model_type, '')} 模型"
         self.draw_text(title, 60, self.font_large, COLOR_TITLE)
@@ -242,11 +270,24 @@ class ModelSelector:
             for i, model_path in enumerate(models):
                 # 簡化顯示名稱
                 display_name = os.path.basename(model_path)
+                
+                # 特殊標記
                 if 'best_model' in model_path:
                     display_name = "★ " + display_name + " (最佳)"
                 
+                # V3 階段標記
+                if self.selected_model_type == 'ppo_v3':
+                    if 'Stage1_Novice' in model_path:
+                        display_name = "🎓 階段1: " + display_name + " (6x6)"
+                    elif 'Stage2_Intermediate' in model_path:
+                        display_name = "🎓 階段2: " + display_name + " (8x8)"
+                    elif 'Stage3_Advanced' in model_path:
+                        display_name = "🎓 階段3: " + display_name + " (10x10)"
+                    elif 'Stage4_Master' in model_path:
+                        display_name = "🎓 階段4: " + display_name + " (12x12)"
+                
                 btn = UIButton(center_x, start_y + i * 70, button_width, button_height, 
-                              display_name[:60], model_path)
+                              display_name[:70], model_path)
                 self.model_file_buttons.append(btn)
         
         # 繪製按鈕
@@ -591,7 +632,7 @@ def watch_ppo_play(version='v1', board_size=None, model_path=None):
     """觀看 PPO AI 遊戲並顯示決策過程
     
     Args:
-        version: 'v1' 或 'v2'，選擇 PPO 版本
+        version: 'v1', 'v2', 或 'v3'，選擇 PPO 版本
         board_size: 棋盤大小，None 表示讓用戶選擇
         model_path: 模型路徑，None 表示自動搜尋
     """
@@ -608,6 +649,19 @@ def watch_ppo_play(version='v1', board_size=None, model_path=None):
     # 嘗試載入 PPO 模型
     if model_path:
         models_to_try = [model_path]
+    elif version == 'v3':
+        # V3 根據棋盤大小選擇對應的階段模型
+        stage_map = {
+            6: "Stage1_Novice",
+            8: "Stage2_Intermediate",
+            10: "Stage3_Advanced",
+            12: "Stage4_Master"
+        }
+        stage = stage_map.get(board_size, "Stage2_Intermediate")
+        models_to_try = [
+            f"models/ppo_snake_v3_curriculum/{stage}/best_model/best_model.zip",
+            f"models/ppo_snake_v3_curriculum/{stage}/model.zip",
+        ]
     elif version == 'v2':
         models_to_try = [
             "models/ppo_snake_v2/best_model/best_model.zip",
@@ -635,14 +689,25 @@ def watch_ppo_play(version='v1', board_size=None, model_path=None):
     if model is None:
         print(f"警告: 未找到 PPO {version.upper()} 預訓練模型")
         print(f"請先訓練模型:")
-        if version == 'v2':
+        if version == 'v3':
+            print(f"  python snake_ai_ppo_v3.py --mode train")
+        elif version == 'v2':
             print(f"  python snake_ai_ppo_v2.py --mode train --timesteps 500000 --board-size {board_size}")
         else:
             print(f"  python snake_ai_ppo.py --mode train --timesteps 100000 --board-size {board_size}")
         return
     
     # 創建遊戲環境
-    if version == 'v2':
+    if version == 'v3':
+        env = GymSnakeEnvV2(board_size=board_size, render_mode="human")
+        version_name = "PPO V3 (Curriculum Learning)"
+        features = [
+            "課程學習：循序漸進訓練",
+            "遷移學習：知識逐級傳遞",
+            "更大神經網路 [256, 256, 128]",
+            "16-d 觀察空間 + V2 獎勵塑形",
+        ]
+    elif version == 'v2':
         env = GymSnakeEnvV2(board_size=board_size, render_mode="human")
         version_name = "PPO V2 (Enhanced Collision Avoidance)"
         features = [
@@ -1217,8 +1282,9 @@ def run_with_ui_selector():
         watch_ppo_play(version='v1', board_size=board_size, model_path=model_path)
     elif model_type == 'ppo_v2':
         watch_ppo_play(version='v2', board_size=board_size, model_path=model_path)
-
-
+    elif model_type == 'ppo_v3':
+        watch_ppo_play(version='v3', board_size=board_size, model_path=model_path)
+    
 def main():
     """主函數"""
     
@@ -1231,6 +1297,7 @@ def main():
     has_qlearning = len(available_models['qlearning']) > 0
     has_ppo_v1 = len(available_models['ppo_v1']) > 0
     has_ppo_v2 = len(available_models['ppo_v2']) > 0
+    has_ppo_v3 = len(available_models['ppo_v3']) > 0
     
     print("\n可用的 AI 模型:")
     if has_qlearning:
@@ -1248,6 +1315,11 @@ def main():
             print(f"  ✓ PPO V2: {len(available_models['ppo_v2'])} 個模型")
         else:
             print(f"  ✗ PPO V2: 無可用模型")
+        
+        if has_ppo_v3:
+            print(f"  ✓ PPO V3 (課程學習): {len(available_models['ppo_v3'])} 個模型")
+        else:
+            print(f"  ✗ PPO V3: 無可用模型")
     else:
         print(f"  ✗ PPO: 需要安裝 stable_baselines3")
     
