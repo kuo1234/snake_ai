@@ -3,7 +3,7 @@ import random
 import pickle
 import matplotlib.pyplot as plt
 from collections import deque
-from snake_game import SnakeGame
+from envs.snake_game import SnakeGame
 
 class SnakeAI:
     """

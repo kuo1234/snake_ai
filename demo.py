@@ -8,7 +8,7 @@ import os
 # 添加当前目录到Python路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from snake_game import SnakeGame
+from envs.snake_game import SnakeGame
 
 def demo_game():
     """演示游戏基本功能"""

@@ -7,7 +7,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 from snake_ai import SnakeAI
-from snake_game import SnakeGame
+from envs.snake_game import SnakeGame
 import time
 
 def quick_train():
