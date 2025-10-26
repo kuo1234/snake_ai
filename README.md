@@ -1,6 +1,6 @@
 # Snake Game with AI
 
-一個使用 pygame 制作的經典貪吃蛇遊戲，結合了基於貝爾曼方程的Q-learning人工智慧。
+一個使用 pygame 制作的經典貪吃蛇遊戲，結合了多種強化學習算法的人工智慧。
 
 ## 功能特點
 
@@ -15,33 +15,167 @@
 - 分數顯示和倒計時開始
 
 ### 🤖 AI智能體
-- **Q-learning算法**: 基於貝爾曼方程的強化學習
+
+#### 1. PPO V3 (Curriculum Learning) - 課程學習版本 🎓⭐⭐
+- **最新創新**: 引入課程學習（Curriculum Learning）
+- **階段式訓練**: 從 6x6 → 8x8 → 10x10 → 12x12 循序漸進
+- **遷移學習**: 前一階段知識遷移到下一階段
+- **更強網路**: [256, 256, 128] 神經網路
+- **自動化流程**: 自動檢查畢業標準並升級
+- **大棋盤突破**: 在 10x10, 12x12 上表現優異
+- **詳細文檔**: 見 [docs/PPO_V3_CURRICULUM_LEARNING.md](docs/PPO_V3_CURRICULUM_LEARNING.md)
+
+**快速開始 PPO V3**:
+```bash
+# 完整課程訓練（4個階段，總計約 6-9 小時）
+python snake_ai_ppo_v3.py --mode train --device auto --n-envs 8
+
+# 使用 GPU 加速課程訓練
+python snake_ai_ppo_v3.py --mode train --device cuda --n-envs 16
+
+# 觀看特定階段的 AI（0=6x6, 1=8x8, 2=10x10, 3=12x12）
+python snake_ai_ppo_v3.py --mode demo --stage 2
+
+# 評估課程學習效果
+python snake_ai_ppo_v3.py --mode eval --stage 3 --n-episodes 50
+```
+
+#### 2. PPO V2 (Enhanced Collision Avoidance) - 微觀教練版本 ⭐🌟
+- **微觀教練**: 漸進式懲罰，教導避免自撞
+- **增強觀察空間**: 16-d（包含身體距離感知）
+- **困境偵測**: 避免陷入無路可走的情況
+- **更好的獎勵塑形**: 學習安全導航
+- **詳細文檔**: 見 [docs/PPO_V2_README.md](docs/PPO_V2_README.md)
+
+**快速開始 PPO V2**:
+```bash
+# 訓練 V2（50萬步，約30-60分鐘）
+python snake_ai_ppo_v2.py --mode train --timesteps 500000 --board-size 8
+
+# 使用 GPU 加速（16個平行環境）
+python snake_ai_ppo_v2.py --mode train --timesteps 1000000 --n-envs 16
+
+# 觀看 V2 AI 玩遊戲
+python snake_ai_ppo_v2.py --mode demo --n-episodes 5
+
+# 比較 V1 vs V2 效能
+python snake_ai_ppo_v2.py --mode compare --n-episodes 50
+```
+
+#### 3. PPO V1 (Proximal Policy Optimization) - 基礎版本 🌟
+- **最新方法**: 使用 stable_baselines3 和 PyTorch
+- **高效訓練**: 支持多進程並行訓練
+- **現代架構**: 深度神經網路策略
+- **易於使用**: 簡單的命令行介面
+- **詳細文檔**: 見 [docs/PPO_README.md](docs/PPO_README.md)
+
+**快速開始 PPO**:
+```bash
+# 安裝依賴（包含 torch, stable-baselines3, gymnasium）
+pip install -r requirements.txt
+
+# 訓練 AI（10萬步快速訓練）
+python snake_ai_ppo.py --mode train --timesteps 100000 --board-size 8
+
+# 使用 GPU 加速訓練（自動偵測）⚡
+python snake_ai_ppo.py --mode train --timesteps 500000 --n-envs 16
+
+# 觀看訓練好的 AI 玩遊戲
+python snake_ai_ppo.py --mode demo --model-path models/ppo_snake/ppo_snake_final
+```
+
+💡 **GPU 加速**: 見 [docs/GPU_SETUP.md](docs/GPU_SETUP.md) 了解如何配置和使用 GPU 訓練
+
+#### 4. Q-learning（傳統方法）
+- **傳統算法**: 基於貝爾曼方程的強化學習
 - **狀態簡化**: 將複雜遊戲狀態壓縮為12個關鍵特徵
-- **智能決策**: AI學會避開危險並高效收集食物
-- **訓練可視化**: 實時查看訓練進度和AI表現
+- **Q表學習**: 使用表格方法存儲狀態-動作值
+- **適合小棋盤**: 在較小的棋盤（6x6, 8x8）上表現良好
+
+## 計分系統
+
+- 每吃到一個食物：**+1 分**
+- 最高分：**board_size² - 1**
+  - 8x8 棋盤：最高 63 分
+  - 10x10 棋盤：最高 99 分
+  - 12x12 棋盤：最高 143 分
 
 ## 安裝要求
 
-- Python 3.7+
+### 基礎依賴
+- Python 3.8+
 - pygame
 - numpy  
 - matplotlib
 
+### PPO 額外依賴
+- torch (PyTorch)
+- stable-baselines3
+- gymnasium
+- tensorboard
+
 ## 安裝
 
-1. 安裝依賴包：
+1. 安裝所有依賴包：
 ```bash
 pip install -r requirements.txt
 ```
 
 ## 運行方式
 
-### 1. 人類玩家模式
+### 🎨 1. 圖形化模型選擇器（最簡單，推薦新手）⭐
+
+**一鍵啟動，滑鼠點擊選擇模型和設定！**
+
+```bash
+# 方法 1：批次檔（Windows）
+run_ui_selector.bat
+
+# 方法 2：Python 腳本
+python demo_ui.py
+
+# 方法 3：從主選單啟動
+python demo_ai.py  # 然後選擇選項 0
+```
+
+**功能特點：**
+- 🖱️ 滑鼠點擊選擇，無需命令行
+- 📊 自動掃描所有可用模型
+- 🎯 可選擇 Q-learning、PPO V1、PPO V2
+- 📏 可選擇棋盤大小（6x6、8x8、10x10、12x12）
+- ✨ 美觀的 pygame UI 界面
+
+詳細使用指南請見 [docs/UI_SELECTOR_GUIDE.md](docs/UI_SELECTOR_GUIDE.md)
+
+---
+
+### 2. 人類玩家模式
 ```bash
 python snake_game.py
 ```
 
-### 2. AI訓練模式
+---
+
+### 3. PPO AI 訓練（推薦）
+```bash
+# 快速訓練（10萬步，約5-10分鐘）
+python snake_ai_ppo.py --mode train --timesteps 100000 --board-size 8
+
+# 標準訓練（50萬步，約30-60分鐘）
+python snake_ai_ppo.py --mode train --timesteps 500000 --board-size 8
+
+# 評估模型
+python snake_ai_ppo.py --mode eval --n-episodes 20
+
+# 觀看 AI 玩遊戲（有圖形界面）
+python snake_ai_ppo.py --mode demo --n-episodes 5
+```
+
+詳細的 PPO 使用說明請見 [docs/PPO_README.md](docs/PPO_README.md)
+
+---
+
+### 4. Q-learning AI 訓練（傳統方法）
 ```bash
 # 快速訓練 (500回合, 6x6棋盤)
 python train.py --mode quick
@@ -56,20 +190,23 @@ python train.py --mode intensive
 python train.py --mode compare
 ```
 
-### 3. AI演示模式
-```bash
-# 觀看AI遊戲 (需要已訓練的模型)
-python demo_ai.py
+---
 
-# 或使用訓練腳本的演示模式
-python train.py --mode demo
+### 5. AI演示模式（命令行選單）
+
+安裝 gymnasium（已加入到 `requirements.txt`）：
+
+```bash
+pip install -r requirements.txt
 ```
 
-### 4. 模型分析
+使用隨機策略運行示例：
+
 ```bash
-# 分析Q表內容
-python train.py --mode analyze --model snake_ai_standard.pkl
+python demo_gym.py
 ```
+
+注意：這個封裝目前提供二進位特徵觀察（12 維），與 `SnakeAI` 使用的狀態表示一致，方便快速集成自定義訓練循環或第三方 RL 庫。
 
 ## 遊戲控制
 
@@ -151,6 +288,17 @@ Q(s,a) = R(s,a) + γ * max(Q(s',a'))
 - `discount_factor` - 折扣因子（預設0.95）
 - `epsilon` - 初始探索率（預設1.0）
 - `epsilon_decay` - 探索衰減率（預設0.995）
+
+## 📚 文檔索引
+
+所有詳細文檔都存放在 [`docs/`](docs/) 資料夾中：
+
+- **[PPO_V2_README.md](docs/PPO_V2_README.md)** - PPO V2 增強版訓練指南（解決碰撞問題）⭐ 推薦
+- **[PPO_README.md](docs/PPO_README.md)** - PPO 訓練快速開始指南
+- **[GPU_SETUP.md](docs/GPU_SETUP.md)** - GPU 訓練設定完整指南 ⚡
+- **[PPO_INTRO.md](docs/PPO_INTRO.md)** - PPO 算法詳細介紹（原理、架構、訓練建議）
+- **[DEMO_GUIDE.md](docs/DEMO_GUIDE.md)** - demo_ai.py 使用指南
+- **[CHANGES.md](docs/CHANGES.md)** - 改動總結和版本歷史
 
 ## 未來改進方向
 
