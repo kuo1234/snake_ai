@@ -1,9 +1,16 @@
 """
-PPO V3: Curriculum Learning版本
-結合 V2 的獎勵塑形 + 課程學習（從易到難）
+PPO V3: Curriculum Learning 課程學習版本（V3 優化獎勵）
+結合 V3 的課程優化獎勵 + 課程學習（從易到難）
+
+V3 獎勵優化重點：
+✓ 從邊角開始：獎勵在邊緣移動（+0.3 * 邊緣係數），邊緣時間佔比追蹤
+✓ 保持耐心：降低距離獎勵急迫性（+0.3/-0.2，原為 +1.0/-0.5），提高生存獎勵（+0.2）
+✓ 善用轉彎：獎勵避開碰撞的戰術轉彎（+0.5），追蹤成功轉彎數
+✓ 空間管理：中心開放獎勵（+0.5），降低陷阱懲罰（-1.5）
+✓ 溫和懲罰：降低死亡懲罰（-10 to -30，原為 -20 to -50），專注學習而非恐懼
 
 課程設計：
-階段 1: 6x6 小棋盤（新手村）- 學習基本生存和覓食
+階段 1: 6x6 小棋盤（新手村）- 學習從邊角開始、保持耐心、善用轉彎
 階段 2: 8x8 標準棋盤（進階班）- 在中等空間中優化策略
 階段 3: 10x10 困難棋盤（挑戰班）- 處理更複雜的空間規劃
 階段 4: 12x12 極難棋盤（大師班）- 最終挑戰
@@ -11,12 +18,13 @@ PPO V3: Curriculum Learning版本
 每個階段都會：
 1. 繼承上一階段的模型（Transfer Learning）
 2. 設定畢業標準（平均分數達標）
-3. 使用 V2 的微觀教練（獎勵塑形）
+3. 使用 V3 的課程優化獎勵（專為小地圖設計）
 
 新增特性：
-- 更大的神經網路（MLP [256, 256, 128] 取代 [128, 128, 64]）
-- 更長的訓練時間（每階段允許更多探索）
-- 自動階段切換（達標後自動升級）
+- V3 環境：20維觀察空間（增加邊緣距離、蛇長比例、可用空間比例）
+- 更大的神經網路：[256, 256, 128] 取代 [128, 128, 64]
+- 更長的訓練時間：Stage 1 增加到 50萬步（從 30萬）
+- 自動階段切換：達標後自動升級（無需手動確認）
 - 完整的訓練追蹤和日誌
 """
 
@@ -33,8 +41,8 @@ from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, Check
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 
-# 導入 V2 環境
-from envs.gym_snake_env_v2 import GymSnakeEnvV2
+# 導入 V3 環境（課程優化版）
+from envs.gym_snake_env_v3 import GymSnakeEnvV3
 
 
 class CurriculumStage:
@@ -58,20 +66,20 @@ class CurriculumManager:
         self.base_dir = base_dir
         os.makedirs(base_dir, exist_ok=True)
         
-        # 定義課程階段
+        # 定義課程階段（使用 V3 優化後的獎勵）
         self.stages = [
             CurriculumStage(
                 name="Stage1_Novice",
                 board_size=6,
-                timesteps=300000,  # 30萬步
-                graduation_score=20.0,  # 6x6 最高35分，要求20分畢業
-                description="新手村：6x6小棋盤，學習基本生存和覓食"
+                timesteps=500000,  # 50萬步（增加訓練時間，學習邊緣策略）
+                graduation_score=25.0,  # 6x6 最高35分，要求25分畢業（提高標準）
+                description="新手村：6x6小棋盤，學習從邊角開始、保持耐心、善用轉彎"
             ),
             CurriculumStage(
                 name="Stage2_Intermediate",
                 board_size=8,
                 timesteps=500000,  # 50萬步
-                graduation_score=35.0,  # 8x8 最高63分，要求35分畢業
+                graduation_score=40.0,  # 8x8 最高63分，要求40分畢業（提高標準）
                 description="進階班：8x8標準棋盤，優化中等空間策略"
             ),
             CurriculumStage(
@@ -186,7 +194,8 @@ class CurriculumCallback(BaseCallback):
     def _evaluate_agent(self) -> float:
         """評估當前智能體"""
         stage = self.curriculum_manager.current_stage
-        env = GymSnakeEnvV2(board_size=stage.board_size, render_mode=None)
+        stage_num = self.curriculum_manager.current_stage_idx + 1
+        env = GymSnakeEnvV3(board_size=stage.board_size, render_mode=None, stage=stage_num)
         
         scores = []
         for _ in range(self.n_eval_episodes):
@@ -202,19 +211,35 @@ class CurriculumCallback(BaseCallback):
         return np.mean(scores)
 
 
-def create_v3_model(board_size: int, device: str = 'auto', 
-                    prev_model: Optional[PPO] = None) -> PPO:
-    """創建 V3 增強模型
+def create_v3_model(board_size: int, base_model: Optional[PPO] = None, 
+                   log_dir: Optional[str] = None, device: str = 'auto', stage: int = 1) -> PPO:
+    """創建 V3 增強模型（支持动态课程奖励）
     
     相比 V2 的改進：
     - 更大的網路：[256, 256, 128] vs V2 的 [128, 128, 64]
     - 更多探索：learning_rate 稍高
     - 支持遷移學習：可以載入前一階段的模型
+    - 動態課程：Stage 1-4 動態獎勵係數
+    
+    Args:
+        board_size: 板子大小
+        base_model: 用於遷移學習的基礎模型
+        log_dir: 日誌目錄
+        device: 'cpu', 'cuda', 或 'auto'
+        stage: 訓練階段 (1-4)
     """
+    
+    # 根据板子大小和stage决定课程阶段（向后兼容）
+    curriculum_stage = "conservative" if stage == 1 else "aggressive"
     
     # 創建環境
     def make_env():
-        env = GymSnakeEnvV2(board_size=board_size, render_mode=None)
+        env = GymSnakeEnvV3(
+            board_size=board_size, 
+            render_mode=None,
+            curriculum_stage=curriculum_stage,
+            stage=stage  # NEW: Pass stage parameter
+        )
         env = Monitor(env)
         return env
     
@@ -230,7 +255,7 @@ def create_v3_model(board_size: int, device: str = 'auto',
     )
     
     # 如果有前一階段的模型，進行遷移學習
-    if prev_model is not None:
+    if base_model is not None:
         print(f"🔄 遷移學習：載入前一階段的模型權重...")
         # 創建新模型但使用舊模型的部分參數
         model = PPO(
@@ -319,6 +344,31 @@ def train_curriculum(device: str = 'auto', start_stage: int = 0,
     
     prev_model = None
     
+    # 檢查是否有已訓練好的前一階段模型
+    if start_stage > 0:
+        prev_stage_idx = start_stage - 1
+        prev_stage = curriculum.stages[prev_stage_idx]
+        prev_model_path = curriculum.get_best_model_path(prev_stage)
+        
+        if os.path.exists(prev_model_path + ".zip"):
+            print(f"\n🔍 發現已訓練的 {prev_stage.name} 模型")
+            print(f"   路徑: {prev_model_path}")
+            try:
+                prev_model = PPO.load(prev_model_path)
+                print(f"   ✓ 成功載入前一階段模型，將用於遷移學習")
+            except Exception as e:
+                print(f"   ✗ 載入失敗: {e}")
+                print(f"   將從頭開始訓練")
+                prev_model = None
+        else:
+            print(f"\n⚠️  警告: 找不到 {prev_stage.name} 的模型")
+            print(f"   預期路徑: {prev_model_path}")
+            print(f"   建議先訓練 Stage {prev_stage_idx + 1}")
+            response = input(f"   是否繼續從頭訓練 Stage {start_stage + 1}? (y/n): ")
+            if response.lower() != 'y':
+                print("   訓練取消")
+                return
+    
     # 逐階段訓練
     for stage_idx in range(start_stage, len(curriculum.stages)):
         curriculum.current_stage_idx = stage_idx
@@ -330,11 +380,64 @@ def train_curriculum(device: str = 'auto', start_stage: int = 0,
         print(f"   棋盤大小: {stage.board_size}x{stage.board_size}")
         print(f"   訓練步數: {stage.timesteps:,}")
         print(f"   畢業標準: 平均分數 ≥ {stage.graduation_score}")
+        print(f"   階段編號: Stage {stage_idx + 1}")
         print("="*70)
         
         # 創建模型
         print("\n🔧 準備模型...")
-        model = create_v3_model(stage.board_size, device, prev_model)
+        
+        # 如果是從前一階段遷移，使用參數震盪策略
+        if prev_model is not None:
+            print(f"   🔄 從 Stage {stage_idx} 遷移學習...")
+            
+            # 創建新環境（重要：傳入新的 stage 參數）
+            model = create_v3_model(stage.board_size, base_model=prev_model, 
+                                   device=device, stage=stage_idx + 1)
+            
+            # === 強化參數震盪 (Enhanced Hyperparameter Shock) ===
+            # 同時提高學習率和探索率來打破舊策略
+            print(f"   ⚡ 強化參數震盪: 提高學習率 + 探索率以打破舊策略...")
+            original_lr = model.learning_rate
+            original_ent = model.ent_coef
+            
+            # 階段 1: 高學習率 + 高探索率震盪（150k 步）
+            model.learning_rate = 3e-4  # 提高學習率
+            model.ent_coef = 0.02       # 提高探索率（原始約 0.01）
+            print(f"      - 震盪階段: LR = 3e-4, Entropy = 0.02")
+            print(f"      - 訓練 150,000 步（強制重新探索）")
+            
+            model.learn(
+                total_timesteps=150_000,
+                callback=[],
+                progress_bar=True,
+                reset_num_timesteps=False
+            )
+            
+            # 階段 2: 中等學習率 + 中等探索率過渡（100k 步）
+            model.learning_rate = 1.5e-4
+            model.ent_coef = 0.015
+            print(f"      - 過渡階段: LR = 1.5e-4, Entropy = 0.015")
+            print(f"      - 訓練 100,000 步（穩定策略）")
+            
+            model.learn(
+                total_timesteps=100_000,
+                callback=[],
+                progress_bar=True,
+                reset_num_timesteps=False
+            )
+            
+            # 階段 3: 恢復正常參數
+            model.learning_rate = original_lr
+            model.ent_coef = original_ent
+            print(f"      - 穩定階段: LR = {original_lr}, Entropy = {original_ent}")
+            print(f"      - 繼續訓練...")
+            remaining_timesteps = stage.timesteps - 250_000
+            
+        else:
+            # 第一階段，從頭開始
+            model = create_v3_model(stage.board_size, base_model=None, 
+                                   device=device, stage=stage_idx + 1)
+            remaining_timesteps = stage.timesteps
         
         # 設置日誌
         log_path = os.path.join(curriculum.base_dir, stage.name, "logs")
@@ -359,15 +462,16 @@ def train_curriculum(device: str = 'auto', start_stage: int = 0,
             )
         ]
         
-        # 開始訓練
+        # 訓練
         print(f"\n🚀 開始訓練 {stage.name}...")
         start_time = time.time()
         
         try:
             model.learn(
-                total_timesteps=stage.timesteps,
+                total_timesteps=remaining_timesteps,
                 callback=callbacks,
-                progress_bar=True
+                progress_bar=True,
+                reset_num_timesteps=False if prev_model is not None else True
             )
         except KeyboardInterrupt:
             print("\n⚠️  訓練被用戶中斷")
@@ -398,13 +502,9 @@ def train_curriculum(device: str = 'auto', start_stage: int = 0,
                 model.save(best_path)
                 print(f"   ✓ 畢業模型保存: {best_path}")
             else:
+                # 自動進入下一階段：不再詢問，記錄訊息並繼續
                 print(f"\n❌ 未達畢業標準 ({final_score:.1f} < {stage.graduation_score})")
-                print(f"   建議: 增加訓練步數或調整超參數")
-                # 詢問是否繼續
-                if stage_idx < len(curriculum.stages) - 1:
-                    response = input("\n是否繼續下一階段？(y/n): ")
-                    if response.lower() != 'y':
-                        break
+                print(f"   自動前進至下一階段（已在本階段完成 {stage.timesteps:,} 步訓練）。")
         else:
             stage.completed = True
         
@@ -412,8 +512,12 @@ def train_curriculum(device: str = 'auto', start_stage: int = 0,
         curriculum.save_progress()
         
         # 準備下一階段（遷移學習）
-        if stage.completed and stage_idx < len(curriculum.stages) - 1:
-            print(f"\n🎓 {stage.name} 畢業！準備進入下一階段...")
+        if stage_idx < len(curriculum.stages) - 1:
+            if stage.completed:
+                print(f"\n🎓 {stage.name} 畢業！準備進入下一階段...")
+            else:
+                print(f"\n➡️  尚未達標，但將帶著本階段的權重繼續下一階段。")
+            # 無論是否畢業，都使用本階段訓練後的模型作為下一階段的起點
             prev_model = model
         
         print("\n")
@@ -432,9 +536,12 @@ def train_curriculum(device: str = 'auto', start_stage: int = 0,
     print(f"\n詳細進度已保存至: {curriculum.base_dir}/curriculum_progress.txt")
 
 
-def evaluate_model(model: PPO, board_size: int, n_episodes: int = 20) -> float:
+def evaluate_model(model: PPO, board_size: int, n_episodes: int = 20, stage: int = 1) -> float:
     """評估模型性能"""
-    env = GymSnakeEnvV2(board_size=board_size, render_mode=None)
+    # 根据板子大小确定课程阶段（向后兼容）
+    curriculum_stage = "conservative" if stage == 1 else "aggressive"
+    env = GymSnakeEnvV3(board_size=board_size, render_mode=None, 
+                       curriculum_stage=curriculum_stage, stage=stage)
     scores = []
     
     for i in range(n_episodes):
@@ -480,7 +587,11 @@ def demo_stage(stage_idx: int = -1, n_episodes: int = 5):
     print(f"   載入模型: {model_path}")
     
     model = PPO.load(model_path)
-    env = GymSnakeEnvV2(board_size=stage.board_size, render_mode="human")
+    # 根据阶段索引确定 stage 参数
+    stage_num = stage_idx + 1
+    curriculum_stage = "conservative" if stage_num == 1 else "aggressive"
+    env = GymSnakeEnvV3(board_size=stage.board_size, render_mode="human", 
+                       curriculum_stage=curriculum_stage, stage=stage_num)
     
     for episode in range(n_episodes):
         print(f"\n回合 {episode + 1}/{n_episodes}")
@@ -546,7 +657,8 @@ def main():
         
         print(f"\n📊 評估 {stage.name} ({stage.board_size}x{stage.board_size})")
         model = PPO.load(model_path)
-        evaluate_model(model, stage.board_size, n_episodes=args.n_episodes)
+        stage_num = stage_idx + 1
+        evaluate_model(model, stage.board_size, n_episodes=args.n_episodes, stage=stage_num)
 
 
 if __name__ == "__main__":
